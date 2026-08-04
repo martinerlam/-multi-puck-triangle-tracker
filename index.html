@@ -733,8 +733,8 @@
     }
   }
 
-  crosshairToggle.addEventListener('click', () => setCrosshairsEnabled(!crosshairsEnabled));
-  haloToggle.addEventListener('click', () => setHaloEnabled(!haloEnabled));
+  bindTap(crosshairToggle, () => setCrosshairsEnabled(!crosshairsEnabled));
+  bindTap(haloToggle, () => setHaloEnabled(!haloEnabled));
 
   // ---------------------------------------------------------------
   // Halo center-offset calibration
@@ -833,10 +833,10 @@
   }
 
   document.querySelectorAll('#haloCenterPanel .nudgeGrid button[data-dir]').forEach(btn => {
-    btn.addEventListener('click', () => nudgeHalo(btn.getAttribute('data-dir')));
+    bindTap(btn, () => nudgeHalo(btn.getAttribute('data-dir')));
   });
 
-  haloOffsetReset.addEventListener('click', () => {
+  bindTap(haloOffsetReset, () => {
     if (!lastPuckFrame) return;
     const { profileName } = lastPuckFrame;
     haloOffsets[profileName] = { forward: 0, right: 0 };
@@ -851,10 +851,10 @@
   function closeHaloCenterPanel() {
     haloCenterPanel.classList.remove('visible');
   }
-  centerHaloBtn.addEventListener('click', () => {
+  bindTap(centerHaloBtn, () => {
     haloCenterPanel.classList.contains('visible') ? closeHaloCenterPanel() : openHaloCenterPanel();
   });
-  haloCenterClose.addEventListener('click', closeHaloCenterPanel);
+  bindTap(haloCenterClose, closeHaloCenterPanel);
 
   // ---------------------------------------------------------------
   // Rotation meter — a single bar whose height animates smoothly up
@@ -912,14 +912,36 @@
       geometryOverlay.contains(target) || haloCenterPanel.contains(target);
   }
 
-  calibrateBtn.addEventListener('click', openCalibrate);
+  // Browsers generally only synthesize a 'click' from a touch when that
+  // touch looks like an isolated tap — with the puck's 3 contacts already
+  // active, a new touch looks like part of an ongoing multi-touch gesture,
+  // so 'click' often never fires (this affects native browser chrome too,
+  // e.g. the refresh button, not just our page). touchstart itself DOES
+  // still reliably fire though, so every interactive element is bound to
+  // that directly instead of depending on click synthesis.
+  function bindTap(el, handler) {
+    let firedByTouch = false;
+    el.addEventListener('touchstart', (e) => {
+      firedByTouch = true;
+      e.preventDefault();
+      e.stopPropagation();
+      handler(e);
+      setTimeout(() => { firedByTouch = false; }, 500);
+    }, { passive: false });
+    el.addEventListener('click', (e) => {
+      if (firedByTouch) return; // avoid double-firing if click still slips through
+      handler(e);
+    });
+  }
+
+  bindTap(calibrateBtn, openCalibrate);
   function openCalibrate() {
     calibrateStatus.textContent = '';
     measuredMmInput.value = '';
     calibrateOverlay.classList.add('visible');
   }
-  calibrateCancel.addEventListener('click', () => calibrateOverlay.classList.remove('visible'));
-  calibrateSave.addEventListener('click', () => {
+  bindTap(calibrateCancel, () => calibrateOverlay.classList.remove('visible'));
+  bindTap(calibrateSave, () => {
     const mm = parseFloat(measuredMmInput.value);
     if (!mm || mm <= 0) {
       calibrateStatus.textContent = 'Enter the measured length in mm first.';
@@ -963,7 +985,7 @@
 
       row.appendChild(info);
       row.appendChild(chevron);
-      row.addEventListener('click', () => openProfileEdit(idx));
+      bindTap(row, () => openProfileEdit(idx));
       profileListEl.appendChild(row);
     });
   }
@@ -989,17 +1011,17 @@
     profileEditView.style.display = '';
   }
 
-  geometryBtn.addEventListener('click', openGeometry);
+  bindTap(geometryBtn, openGeometry);
   function openGeometry() {
     showProfileListView();
     geometryOverlay.classList.add('visible');
   }
-  geometryCancel.addEventListener('click', () => geometryOverlay.classList.remove('visible'));
+  bindTap(geometryCancel, () => geometryOverlay.classList.remove('visible'));
 
-  profileAddNew.addEventListener('click', () => openProfileEdit(null));
-  profileEditCancel.addEventListener('click', showProfileListView);
+  bindTap(profileAddNew, () => openProfileEdit(null));
+  bindTap(profileEditCancel, showProfileListView);
 
-  profileSave.addEventListener('click', () => {
+  bindTap(profileSave, () => {
     const name = profileNameInput.value.trim();
     const leg = parseFloat(legLengthInput.value);
     const base = parseFloat(baseLengthInput.value);
@@ -1022,7 +1044,7 @@
     showProfileListView();
   });
 
-  profileDelete.addEventListener('click', () => {
+  bindTap(profileDelete, () => {
     if (editingProfileIndex === null) return;
     puckProfiles.splice(editingProfileIndex, 1);
     saveProfilesToStorage();
