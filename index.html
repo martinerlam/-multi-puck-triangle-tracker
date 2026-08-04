@@ -543,6 +543,7 @@
 
 <div id="hint">Place all 3 puck contacts down together. Individual touches not matching the puck pattern show as grey crosshairs.</div>
 <div id="debug"></div>
+<div id="rawTouchDebug" style="position:fixed; bottom:56px; left:12px; right:12px; color:#ff5c8a; font-family:-apple-system, sans-serif; font-size:12px; font-weight:700; text-align:center; pointer-events:none;"></div>
 
 <div id="stage"></div>
 <svg id="puckSvg">
@@ -1487,6 +1488,28 @@
     if (hasSurfaceTouch) e.preventDefault();
     updateFromTouches(e.touches);
   }
+
+  // --- Raw diagnostic: counts every touchstart, with NO filtering at
+  // all, so we can tell whether the browser is delivering the event
+  // in the first place, independent of any of our own UI-exclusion logic.
+  let rawTouchStartCount = 0;
+  const rawTouchDebugEl = document.getElementById('rawTouchDebug');
+  document.addEventListener('touchstart', (e) => {
+    rawTouchStartCount++;
+    const targets = Array.from(e.changedTouches).map(t => {
+      let el = t.target;
+      let path = [];
+      let depth = 0;
+      while (el && depth < 4) {
+        path.push(el.id ? '#' + el.id : el.tagName ? el.tagName.toLowerCase() : '?');
+        el = el.parentElement;
+        depth++;
+      }
+      return path.join('<');
+    });
+    rawTouchDebugEl.textContent =
+      `RAW touchstart #${rawTouchStartCount} — total touches now: ${e.touches.length} — new touch target: ${targets.join(', ')}`;
+  }, { passive: true, capture: true });
 
   document.addEventListener('touchstart', handleTouchMove, { passive: false });
   document.addEventListener('touchmove', handleTouchMove, { passive: false });
