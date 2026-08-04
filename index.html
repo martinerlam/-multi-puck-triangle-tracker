@@ -521,6 +521,7 @@
 
 <div id="haloCenterPanel">
   <div class="panelTitle">Center halo on puck</div>
+  <div class="panelTitle" id="haloCenterProfileLabel" style="color:#39ff88;">—</div>
   <div class="nudgeGrid">
     <button class="nudgeUp" data-dir="forward">▲</button>
     <button class="nudgeLeft" data-dir="left">◀</button>
@@ -738,31 +739,68 @@
   // Halo center-offset calibration
   // Offset is stored in the puck's OWN coordinate frame (forward =
   // toward apex, right = perpendicular to that) so it stays correct
-  // no matter how the puck is rotated on screen.
+  // no matter how the puck is rotated on screen. Stored PER PROFILE,
+  // since different puck shapes may have their contacts positioned
+  // differently relative to their true physical center.
   // ---------------------------------------------------------------
-  let haloOffsetForwardMm = parseFloat(localStorage.getItem('puckVis_haloOffsetForward')) || 0;
-  let haloOffsetRightMm = parseFloat(localStorage.getItem('puckVis_haloOffsetRight')) || 0;
+  function loadHaloOffsets() {
+    const raw = localStorage.getItem('puckVis_haloOffsets');
+    if (raw) {
+      try { return JSON.parse(raw); } catch (e) { /* fall through */ }
+    }
+    // Migrate a previously saved global offset onto the first profile,
+    // so earlier single-puck calibration isn't lost.
+    const legacyFwd = parseFloat(localStorage.getItem('puckVis_haloOffsetForward'));
+    const legacyRight = parseFloat(localStorage.getItem('puckVis_haloOffsetRight'));
+    const offsets = {};
+    if ((legacyFwd || legacyRight) && puckProfiles.length > 0) {
+      offsets[puckProfiles[0].name] = { forward: legacyFwd || 0, right: legacyRight || 0 };
+    }
+    return offsets;
+  }
+
+  let haloOffsets = loadHaloOffsets(); // { profileName: { forward, right } }
+  function saveHaloOffsets() {
+    localStorage.setItem('puckVis_haloOffsets', JSON.stringify(haloOffsets));
+  }
+  function getHaloOffset(profileName) {
+    return haloOffsets[profileName] || { forward: 0, right: 0 };
+  }
+
   const NUDGE_STEP_MM = 0.5;
 
-  let lastPuckFrame = null; // { centroidX, centroidY, angleRad } from the most recent detected puck
+  // { id, centroidX, centroidY, angleRad, profileName } of whichever puck
+  // is currently driving the halo-center panel (the lowest-id active puck,
+  // same one that drives the rotation meter).
+  let lastPuckFrame = null;
 
   const centerHaloBtn = document.getElementById('centerHaloBtn');
   const haloCenterPanel = document.getElementById('haloCenterPanel');
+  const haloCenterProfileLabel = document.getElementById('haloCenterProfileLabel');
   const haloOffsetReadout = document.getElementById('haloOffsetReadout');
   const haloOffsetReset = document.getElementById('haloOffsetReset');
   const haloCenterClose = document.getElementById('haloCenterClose');
 
   function updateHaloOffsetReadout() {
+    if (!lastPuckFrame) {
+      haloCenterProfileLabel.textContent = 'No puck detected';
+      haloOffsetReadout.textContent = 'Place a puck on screen to calibrate its halo';
+      return;
+    }
+    const { profileName } = lastPuckFrame;
+    const off = getHaloOffset(profileName);
+    haloCenterProfileLabel.textContent = profileName;
     haloOffsetReadout.textContent =
-      `fwd: ${haloOffsetForwardMm.toFixed(1)}mm  right: ${haloOffsetRightMm.toFixed(1)}mm`;
+      `fwd: ${off.forward.toFixed(1)}mm  right: ${off.right.toFixed(1)}mm`;
   }
   updateHaloOffsetReadout();
 
-  function computeHaloCenter(centroidX, centroidY, angleRad) {
+  function computeHaloCenter(centroidX, centroidY, angleRad, profileName) {
+    const off = getHaloOffset(profileName);
     const fwdX = Math.cos(angleRad), fwdY = Math.sin(angleRad);
     const rightX = Math.cos(angleRad + Math.PI / 2), rightY = Math.sin(angleRad + Math.PI / 2);
-    const offFwdPx = haloOffsetForwardMm * pxPerMm;
-    const offRightPx = haloOffsetRightMm * pxPerMm;
+    const offFwdPx = off.forward * pxPerMm;
+    const offRightPx = off.right * pxPerMm;
     return {
       x: centroidX + offFwdPx * fwdX + offRightPx * rightX,
       y: centroidY + offFwdPx * fwdY + offRightPx * rightY,
@@ -770,20 +808,25 @@
   }
 
   function repositionHaloNow() {
-    if (!haloEnabled || !haloEl || !lastPuckFrame) return;
-    const { centroidX, centroidY, angleRad } = lastPuckFrame;
-    const c = computeHaloCenter(centroidX, centroidY, angleRad);
-    haloEl.style.left = c.x + 'px';
-    haloEl.style.top = c.y + 'px';
+    if (!haloEnabled || !lastPuckFrame) return;
+    const { id, centroidX, centroidY, angleRad, profileName } = lastPuckFrame;
+    const h = haloEls.get(id);
+    if (!h) return;
+    const c = computeHaloCenter(centroidX, centroidY, angleRad, profileName);
+    h.style.left = c.x + 'px';
+    h.style.top = c.y + 'px';
   }
 
   function nudgeHalo(dir) {
-    if (dir === 'forward') haloOffsetForwardMm += NUDGE_STEP_MM;
-    if (dir === 'back') haloOffsetForwardMm -= NUDGE_STEP_MM;
-    if (dir === 'right') haloOffsetRightMm += NUDGE_STEP_MM;
-    if (dir === 'left') haloOffsetRightMm -= NUDGE_STEP_MM;
-    localStorage.setItem('puckVis_haloOffsetForward', haloOffsetForwardMm);
-    localStorage.setItem('puckVis_haloOffsetRight', haloOffsetRightMm);
+    if (!lastPuckFrame) return; // nothing to calibrate until a puck is detected
+    const { profileName } = lastPuckFrame;
+    const off = getHaloOffset(profileName);
+    if (dir === 'forward') off.forward += NUDGE_STEP_MM;
+    if (dir === 'back') off.forward -= NUDGE_STEP_MM;
+    if (dir === 'right') off.right += NUDGE_STEP_MM;
+    if (dir === 'left') off.right -= NUDGE_STEP_MM;
+    haloOffsets[profileName] = off;
+    saveHaloOffsets();
     updateHaloOffsetReadout();
     repositionHaloNow();
   }
@@ -793,10 +836,10 @@
   });
 
   haloOffsetReset.addEventListener('click', () => {
-    haloOffsetForwardMm = 0;
-    haloOffsetRightMm = 0;
-    localStorage.setItem('puckVis_haloOffsetForward', 0);
-    localStorage.setItem('puckVis_haloOffsetRight', 0);
+    if (!lastPuckFrame) return;
+    const { profileName } = lastPuckFrame;
+    haloOffsets[profileName] = { forward: 0, right: 0 };
+    saveHaloOffsets();
     updateHaloOffsetReadout();
     repositionHaloNow();
   });
@@ -1353,7 +1396,7 @@
         const h = ensureHaloEl(id);
         applyHaloSize(h);
         h.style.display = '';
-        const c = computeHaloCenter(centroidX, centroidY, angleRad);
+        const c = computeHaloCenter(centroidX, centroidY, angleRad, profileName);
         h.style.left = c.x + 'px';
         h.style.top = c.y + 'px';
       } else {
@@ -1377,13 +1420,22 @@
       const firstId = sortedIds[0];
       const firstPuck = trackedPucks.get(firstId);
       const firstAngleDeg = ((firstPuck.angleRad * 180 / Math.PI) + 360) % 360;
-      lastPuckFrame = { centroidX: firstPuck.centroidX, centroidY: firstPuck.centroidY, angleRad: firstPuck.angleRad };
+      lastPuckFrame = {
+        id: firstId,
+        centroidX: firstPuck.centroidX,
+        centroidY: firstPuck.centroidY,
+        angleRad: firstPuck.angleRad,
+        profileName: firstPuck.profileName,
+      };
+      if (haloCenterPanel.classList.contains('visible')) updateHaloOffsetReadout();
       updateEQ(firstAngleDeg);
     } else {
       puckStatusEl.textContent = 'not detected';
       puckStatusEl.className = 'status none';
       updateEQ(null);
       updatePuckDots(0);
+      lastPuckFrame = null;
+      if (haloCenterPanel.classList.contains('visible')) updateHaloOffsetReadout();
 
       if (result.closest) {
         const [s1, s2, s3] = result.closest.sortedLens.map(v => v.toFixed(1));
